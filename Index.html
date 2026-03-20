@@ -1,0 +1,396 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  ArrowRight, 
+  Mail, 
+  Phone, 
+  Menu, 
+  X,
+  Award,
+  ChevronRight,
+  MapPin,
+  MessageCircle,
+  Cpu,
+  Layout,
+  Languages,
+  ShieldCheck,
+  Globe,
+  CheckCircle2,
+  Loader2,
+  BarChart3,
+  Users,
+  Search,
+  Download,
+  Eye,
+  Lock,
+  Unlock,
+  Target,
+  Zap,
+  TrendingUp,
+  Briefcase
+} from 'lucide-react';
+
+// Firebase Imports
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query } from 'firebase/firestore';
+
+// Configuration Firebase
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'alpinistes-edu-default';
+
+// Composant Logo Officiel
+const LogoAlpinistes = ({ className = "" }) => (
+  <svg viewBox="0 0 400 400" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="montLeft" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stopColor="#B3D4E9" />
+        <stop offset="100%" stopColor="#6FA8DC" />
+      </linearGradient>
+      <linearGradient id="montCenter" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stopColor="#A2C4E8" />
+        <stop offset="100%" stopColor="#5B9BD5" />
+      </linearGradient>
+    </defs>
+    <rect x="10" y="10" width="380" height="380" rx="80" fill="#E8F1FA" />
+    <polygon points="50,265 115,155 185,265" fill="url(#montLeft)" stroke="#E8F1FA" strokeWidth="12" />
+    <polygon points="120,265 200,65 315,265" fill="url(#montCenter)" stroke="#E8F1FA" strokeWidth="12" />
+    <polygon points="245,265 295,175 365,265" fill="url(#montLeft)" stroke="#E8F1FA" strokeWidth="12" />
+    <polygon points="92,180 115,155 140,195" fill="#FFFFFF" opacity="0.98" />
+    <polygon points="165,115 200,65 240,120" fill="#FFFFFF" opacity="0.98" />
+    <polygon points="275,195 295,175 315,205" fill="#FFFFFF" opacity="0.98" />
+    <line x1="200" y1="65" x2="200" y2="38" stroke="#4A6FA5" strokeWidth="6" />
+    <polygon points="200,42 232,44 200,54" fill="#D32F2F" stroke="#B71C1C" strokeWidth="2" />
+  </svg>
+);
+
+const App = () => {
+  const [activeTab, setActiveTab] = useState('site'); 
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [user, setUser] = useState(null);
+  const [registrations, setRegistrations] = useState([]);
+  
+  // Sécurité Admin
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [adminPasskey, setAdminPasskey] = useState('');
+  const [authError, setAuthError] = useState(false);
+  const SECRET_PASSKEY = "ALPIN2024"; 
+
+  // State pour le formulaire
+  const [formData, setFormData] = useState({ fullName: '', email: '', phone: '', program: '' });
+  const [status, setStatus] = useState('idle');
+
+  const colors = {
+    deepBlue: '#1A3C5E',
+    actionBlue: '#5B9BD5',
+    lightBlue: '#B3D4E9',
+    accentRed: '#D32F2F',
+    softBg: '#E8F1FA',
+    white: '#FFFFFF'
+  };
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) { console.error("Auth error:", error); }
+    };
+    initAuth();
+    const unsubscribeAuth = onAuthStateChanged(auth, setUser);
+    return () => unsubscribeAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!user || !isAdminAuthenticated) return;
+    const registrationsRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrations');
+    const q = query(registrationsRef);
+    const unsubscribeData = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setRegistrations(data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
+    });
+    return () => unsubscribeData();
+  }, [user, isAdminAuthenticated]);
+
+  const handleAdminLogin = (e) => {
+    e.preventDefault();
+    if (adminPasskey === SECRET_PASSKEY) {
+      setIsAdminAuthenticated(true);
+      setAuthError(false);
+    } else {
+      setAuthError(true);
+      setTimeout(() => setAuthError(false), 3000);
+    }
+  };
+
+  const scrollToSection = (id) => {
+    const element = document.getElementById(id);
+    if (element) {
+      window.scrollTo({ top: element.getBoundingClientRect().top + window.pageYOffset - 80, behavior: 'smooth' });
+      setIsMenuOpen(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    setStatus('loading');
+    try {
+      const registrationsRef = collection(db, 'artifacts', appId, 'public', 'data', 'registrations');
+      await addDoc(registrationsRef, { ...formData, userId: user.uid, createdAt: serverTimestamp(), status: 'pending' });
+      setStatus('success');
+      setFormData({ fullName: '', email: '', phone: '', program: '' });
+      setTimeout(() => setStatus('idle'), 5000);
+    } catch (error) { setStatus('error'); }
+  };
+
+  const programs = [
+    { 
+      id: "ai", 
+      title: "IA & Futur du Travail", 
+      desc: "Maîtrisez les outils d'IA générative pour décupler la productivité de vos équipes.",
+      icon: <Cpu className="w-8 h-8" />,
+      features: ["Prompt Engineering", "Automation No-code", "Éthique de l'IA"]
+    },
+    { 
+      id: "cx", 
+      title: "L'Art du Service Client", 
+      desc: "Transformez chaque interaction en une expérience mémorable et fidélisante.",
+      icon: <MessageCircle className="w-8 h-8" />,
+      features: ["Psychologie Client", "Gestion de crise", "Fidélisation active"]
+    },
+    { 
+      id: "pm", 
+      title: "Gestion de Projet Élite", 
+      desc: "Livrez vos projets complexes dans les temps, avec une précision chirurgicale.",
+      icon: <Layout className="w-8 h-8" />,
+      features: ["Méthodes Agiles", "Gestion des Risques", "Outils de Pilotage"]
+    },
+    { 
+      id: "lang", 
+      title: "Langues pour Leaders", 
+      desc: "Brisez les barrières linguistiques et conquérez les marchés internationaux.",
+      icon: <Languages className="w-8 h-8" />,
+      features: ["Business English", "Négociation", "Prise de parole"]
+    }
+  ];
+
+  const AdminDashboard = () => (
+    <div className="min-h-screen bg-slate-50 pt-28 pb-12">
+      {!isAdminAuthenticated ? (
+        <div className="max-w-md mx-auto mt-20 p-10 bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 text-center space-y-8 animate-in fade-in slide-in-from-bottom-4">
+          <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto text-[#1A3C5E]">
+            <Lock size={40} />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black uppercase tracking-tight" style={{ color: colors.deepBlue }}>Accès Restreint</h2>
+            <p className="text-slate-500 text-sm font-medium mt-2">Saisissez le code administrateur.</p>
+          </div>
+          <form onSubmit={handleAdminLogin} className="space-y-4">
+            <input 
+              type="password" 
+              placeholder="••••••••"
+              className={`w-full px-6 py-4 rounded-2xl border-2 bg-slate-50 outline-none transition-all font-bold text-center tracking-[0.5em] ${authError ? 'border-red-500' : 'border-transparent focus:border-blue-400'}`}
+              value={adminPasskey}
+              onChange={(e) => setAdminPasskey(e.target.value)}
+            />
+            <button type="submit" className="w-full py-4 rounded-2xl text-white font-black text-xs uppercase tracking-widest shadow-lg" style={{ backgroundColor: colors.deepBlue }}>Déverrouiller</button>
+          </form>
+        </div>
+      ) : (
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex justify-between items-center mb-10">
+            <h1 className="text-3xl font-black uppercase tracking-tight" style={{ color: colors.deepBlue }}>Inscriptions ({registrations.length})</h1>
+            <button onClick={() => setIsAdminAuthenticated(false)} className="text-red-500 font-bold text-[10px] uppercase tracking-widest">Sortir</button>
+          </div>
+          <div className="bg-white rounded-[2.5rem] shadow-xl overflow-hidden border border-slate-100">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <th className="px-8 py-6">Nom</th>
+                  <th className="px-8 py-6">Programme</th>
+                  <th className="px-8 py-6">Contact</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {registrations.map(reg => (
+                  <tr key={reg.id} className="hover:bg-slate-50/50">
+                    <td className="px-8 py-6 font-black text-sm">{reg.fullName}</td>
+                    <td className="px-8 py-6"><span className="text-[10px] font-black uppercase bg-blue-50 text-blue-600 px-3 py-1 rounded-full">{reg.program}</span></td>
+                    <td className="px-8 py-6 text-xs text-slate-500 font-medium">{reg.email} • {reg.phone}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-white">
+      {/* Floating Admin Switch */}
+      <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] bg-[#1A3C5E]/90 backdrop-blur-xl p-2 rounded-full shadow-2xl border border-white/10 flex space-x-2">
+        <button onClick={() => setActiveTab('site')} className={`px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'site' ? 'bg-white text-[#1A3C5E]' : 'text-white'}`}>Site Vitrine</button>
+        <button onClick={() => setActiveTab('admin')} className={`px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${activeTab === 'admin' ? 'bg-white text-[#1A3C5E]' : 'text-white'}`}>Dashboard {isAdminAuthenticated ? '🔓' : '🔒'}</button>
+      </div>
+
+      {activeTab === 'admin' ? (
+        <AdminDashboard />
+      ) : (
+        <div className="min-h-screen bg-white">
+          {/* Navigation */}
+          <nav className="fixed w-full bg-white/95 backdrop-blur-md z-50 border-b" style={{ borderColor: colors.softBg }}>
+            <div className="max-w-7xl mx-auto px-6 flex justify-between h-20 items-center">
+              <div className="flex items-center space-x-4">
+                <LogoAlpinistes className="w-10 h-10" />
+                <div className="flex flex-col text-left uppercase">
+                  <span className="text-lg font-black tracking-tighter" style={{ color: colors.deepBlue }}>Alpinistes</span>
+                  <span className="text-[7px] font-bold tracking-[0.4em]" style={{ color: colors.actionBlue }}>Executive</span>
+                </div>
+              </div>
+              <div className="hidden lg:flex space-x-8 items-center">
+                {['Approche', 'Programmes', 'Inscription'].map(item => (
+                  <button key={item} onClick={() => scrollToSection(item.toLowerCase())} className="text-[10px] font-black uppercase tracking-widest hover:text-blue-500 transition-colors">{item}</button>
+                ))}
+              </div>
+            </div>
+          </nav>
+
+          {/* Hero */}
+          <section className="relative min-h-screen flex items-center pt-20 bg-[#E8F1FA] overflow-hidden">
+             <div className="max-w-7xl mx-auto px-6 relative z-10">
+                <div className="max-w-3xl space-y-12 animate-in fade-in slide-in-from-left-8 duration-700">
+                   <div className="inline-flex items-center space-x-2 px-4 py-2 bg-white rounded-full text-[10px] font-black uppercase tracking-widest" style={{ color: colors.actionBlue }}>
+                      <Zap size={12} /> <span>Leaders de demain</span>
+                   </div>
+                   <h1 className="text-7xl lg:text-[120px] font-black leading-[0.85] tracking-tighter uppercase" style={{ color: colors.deepBlue }}>
+                      LA HAUTEUR <br/><span className="italic" style={{ color: colors.actionBlue }}>COMME NORME.</span>
+                   </h1>
+                   <p className="text-2xl font-medium border-l-4 pl-8" style={{ borderLeftColor: colors.accentRed }}>
+                      Nous ne formons pas des employés. Nous forgeons les Alpinistes de l'économie malgache, capables de conquérir tous les sommets.
+                   </p>
+                   <button onClick={() => scrollToSection('programmes')} className="bg-[#1A3C5E] text-white px-10 py-6 rounded-3xl font-black text-xs uppercase tracking-widest shadow-2xl hover:scale-105 transition-all">Découvrir les cursus</button>
+                </div>
+             </div>
+          </section>
+
+          {/* Approche Section */}
+          <section id="approche" className="py-32 bg-white">
+            <div className="max-w-7xl mx-auto px-6">
+              <div className="grid lg:grid-cols-2 gap-20 items-center">
+                <div className="space-y-8">
+                  <h2 className="text-5xl font-black uppercase tracking-tighter" style={{ color: colors.deepBlue }}>Une Pédagogie <br/><span style={{ color: colors.actionBlue }}>de Haute Altitude</span></h2>
+                  <p className="text-lg text-slate-600 leading-relaxed">
+                    Chez Alpinistes, nous croyons que la théorie sans exécution est un poids mort. Notre approche repose sur la <strong>mise en situation réelle</strong> et le <strong>mentorat direct</strong> par des experts du secteur.
+                  </p>
+                  <div className="grid gap-6">
+                    {[
+                      { icon: <Target />, title: "Focus Résultats", desc: "Chaque heure de formation doit générer un impact direct sur votre business." },
+                      { icon: <TrendingUp />, title: "Élite Locale", desc: "Des cursus adaptés aux réalités et aux opportunités du marché de Madagascar." },
+                      { icon: <ShieldCheck />, title: "Certification", desc: "Un sceau de qualité reconnu par les plus grands groupes de l'île." }
+                    ].map((item, i) => (
+                      <div key={i} className="flex space-x-6 p-6 rounded-3xl bg-slate-50 border border-slate-100">
+                        <div className="text-blue-500">{item.icon}</div>
+                        <div>
+                          <h4 className="font-black uppercase text-xs tracking-widest mb-1">{item.title}</h4>
+                          <p className="text-sm text-slate-500">{item.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="relative group">
+                   <div className="aspect-[4/5] bg-slate-100 rounded-[3rem] overflow-hidden shadow-2xl">
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#1A3C5E] to-transparent opacity-40"></div>
+                      <div className="absolute bottom-12 left-12 right-12 text-white">
+                        <p className="text-3xl font-black leading-tight uppercase">"L'excellence n'est pas un acte, c'est une habitude."</p>
+                      </div>
+                   </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Programmes Section */}
+          <section id="programmes" className="py-32 bg-slate-50">
+            <div className="max-w-7xl mx-auto px-6">
+              <div className="text-center mb-20 space-y-4">
+                <h2 className="text-5xl font-black uppercase tracking-tighter" style={{ color: colors.deepBlue }}>Nos Filières d'Excellence</h2>
+                <p className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">Choisissez votre sommet</p>
+              </div>
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+                {programs.map((p, i) => (
+                  <div key={i} className="bg-white p-10 rounded-[2.5rem] shadow-sm hover:shadow-2xl transition-all border border-slate-100 group flex flex-col">
+                    <div className="mb-8 p-4 bg-blue-50 rounded-2xl w-fit text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-colors">{p.icon}</div>
+                    <h3 className="text-xl font-black uppercase tracking-tight mb-4" style={{ color: colors.deepBlue }}>{p.title}</h3>
+                    <p className="text-sm text-slate-500 mb-8 flex-grow leading-relaxed">{p.desc}</p>
+                    <ul className="space-y-3 mb-10">
+                      {p.features.map((f, j) => (
+                        <li key={j} className="flex items-center text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          <ChevronRight size={12} className="mr-2 text-blue-400" /> {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <button onClick={() => { setFormData({...formData, program: p.title}); scrollToSection('inscription'); }} className="w-full py-4 bg-slate-50 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-[#1A3C5E] hover:text-white transition-all">S'inscrire</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Inscription Section */}
+          <section id="inscription" className="py-32 bg-white">
+            <div className="max-w-7xl mx-auto px-6">
+              <div className="bg-[#1A3C5E] rounded-[4rem] overflow-hidden flex flex-col lg:flex-row shadow-3xl">
+                <div className="lg:w-1/2 p-20 text-white space-y-8">
+                  <h2 className="text-6xl font-black tracking-tighter uppercase leading-none">Prêt pour <br/><span className="text-blue-300 italic">l'Ascension ?</span></h2>
+                  <p className="text-xl opacity-70 leading-relaxed font-medium">Rejoignez la prochaine promotion Alpinistes. Un consultant pédagogique analysera votre profil sous 24h.</p>
+                  <div className="space-y-4 pt-10 border-t border-white/10">
+                    <div className="flex items-center space-x-4"><div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><Phone size={18}/></div> <span className="font-bold">+261 34 00 000 00</span></div>
+                    <div className="flex items-center space-x-4"><div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"><Mail size={18}/></div> <span className="font-bold">contact@alpinistes.mg</span></div>
+                  </div>
+                </div>
+                <div className="lg:w-1/2 bg-[#E8F1FA] p-20">
+                  {status === 'success' ? (
+                    <div className="h-full flex flex-col items-center justify-center space-y-6 text-center">
+                      <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center text-white"><CheckCircle2 size={40}/></div>
+                      <h3 className="text-3xl font-black uppercase" style={{ color: colors.deepBlue }}>Demande Reçue</h3>
+                      <button onClick={() => setStatus('idle')} className="text-xs font-black uppercase underline">Nouvelle demande</button>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                       <input required value={formData.fullName} onChange={e => setFormData({...formData, fullName: e.target.value})} placeholder="Nom Complet" className="w-full px-8 py-5 rounded-2xl font-bold" />
+                       <input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="Email Professionnel" className="w-full px-8 py-5 rounded-2xl font-bold" />
+                       <input required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="Téléphone" className="w-full px-8 py-5 rounded-2xl font-bold" />
+                       <select required value={formData.program} onChange={e => setFormData({...formData, program: e.target.value})} className="w-full px-8 py-5 rounded-2xl font-bold bg-white appearance-none">
+                         <option value="">Choisir un programme</option>
+                         {programs.map(p => <option key={p.id} value={p.title}>{p.title}</option>)}
+                       </select>
+                       <button type="submit" disabled={status === 'loading'} className="w-full py-6 bg-[#1A3C5E] text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl disabled:opacity-50">
+                        {status === 'loading' ? 'Envoi...' : 'Valider ma candidature'}
+                       </button>
+                    </form>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <footer className="py-20 text-center bg-[#1A3C5E]">
+            <LogoAlpinistes className="w-12 h-12 mx-auto mb-6 opacity-30" />
+            <p className="text-white/20 text-[9px] font-black uppercase tracking-[0.4em]">Alpinistes Executive Education • Antananarivo • Madagascar</p>
+          </footer>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
