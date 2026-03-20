@@ -4,14 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Alpinistes Executive Education - Madagascar</title>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
@@ -32,37 +28,81 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query, doc };
+        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, getFirestore, collection, addDoc, serverTimestamp, onSnapshot, query };
+        window.firebaseReady = true;
     </script>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // Helper pour rendre les icônes Lucide de manière sécurisée en HTML statique
+        // ──────────────────────────────────────────────────────────────
+        // STORAGE HELPERS — LocalStorage fallback (fonctionne toujours)
+        // ──────────────────────────────────────────────────────────────
+        const LS_KEY = 'alpinistes_registrations';
+
+        const lsGetAll = () => {
+            try {
+                return JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+            } catch { return []; }
+        };
+
+        const lsSave = (entry) => {
+            const all = lsGetAll();
+            const newEntry = { ...entry, id: Date.now().toString(), createdAt: new Date().toISOString() };
+            all.unshift(newEntry);
+            localStorage.setItem(LS_KEY, JSON.stringify(all));
+            return newEntry;
+        };
+
+        // ──────────────────────────────────────────────────────────────
+        // CSV EXPORT
+        // ──────────────────────────────────────────────────────────────
+        const exportCSV = (registrations) => {
+            const headers = ['Nom Complet', 'Email', 'Téléphone', 'Programme', 'Date Inscription'];
+            const rows = registrations.map(r => [
+                r.fullName,
+                r.email,
+                r.phone,
+                r.program,
+                r.createdAt ? (r.createdAt.seconds
+                    ? new Date(r.createdAt.seconds * 1000).toLocaleString('fr-FR')
+                    : new Date(r.createdAt).toLocaleString('fr-FR'))
+                    : 'N/A'
+            ]);
+            const csv = [headers, ...rows].map(row => row.map(v => `"${(v||'').replace(/"/g, '""')}"`).join(',')).join('\n');
+            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = 'inscriptions_alpinistes.csv'; a.click();
+            URL.revokeObjectURL(url);
+        };
+
         const LucideIcon = ({ name, size = 24, className = "" }) => {
             const iconRef = useRef(null);
             useEffect(() => {
                 if (iconRef.current && window.lucide) {
                     iconRef.current.innerHTML = '';
-                    const iconElement = window.lucide.createIcons({
-                        icons: { [name]: window.lucide.icons[name] },
-                        attrs: { 
-                            stroke: "currentColor", 
-                            "stroke-width": 2, 
-                            width: size, 
-                            height: size,
-                            class: className
-                        }
-                    });
+                    const icons = window.lucide.icons;
+                    if (icons && icons[name]) {
+                        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                        svg.setAttribute('width', size); svg.setAttribute('height', size);
+                        svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
+                        svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '2');
+                        svg.setAttribute('stroke-linecap', 'round'); svg.setAttribute('stroke-linejoin', 'round');
+                        if (className) svg.setAttribute('class', className);
+                        const [, attrs, children] = icons[name];
+                        if (children) svg.innerHTML = children;
+                        iconRef.current.appendChild(svg);
+                    }
                 }
             }, [name, size, className]);
-            return <span ref={iconRef} className="inline-block"></span>;
+            return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
         };
 
-        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
+        const firebaseConfig = (() => { try { return JSON.parse(window.__firebase_config || '{}'); } catch { return {}; } })();
         const appId = window.__app_id || 'alpinistes-edu-default';
+        const SECRET_PASSKEY = "ALPIN2024";
 
         const LogoAlpinistes = ({ className = "" }) => (
             <svg viewBox="0 0 400 400" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -91,72 +131,94 @@
         const App = () => {
             const [activeTab, setActiveTab] = useState('site');
             const [user, setUser] = useState(null);
+            const [firebaseEnabled, setFirebaseEnabled] = useState(false);
             const [registrations, setRegistrations] = useState([]);
             const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
             const [adminPasskey, setAdminPasskey] = useState('');
             const [authError, setAuthError] = useState(false);
             const [formData, setFormData] = useState({ fullName: '', email: '', phone: '', program: '' });
             const [status, setStatus] = useState('idle');
-            
-            const SECRET_PASSKEY = "ALPIN2024";
 
+            // ── Tentative d'initialisation Firebase (optionnelle) ──
             useEffect(() => {
                 const initFirebase = async () => {
-                    if (!window.FirebaseSDK) return;
+                    if (!window.FirebaseSDK || !firebaseConfig.apiKey) return;
                     const { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } = window.FirebaseSDK;
-                    
                     try {
                         const app = initializeApp(firebaseConfig);
                         const auth = getAuth(app);
-                        
                         const token = window.__initial_auth_token;
-                        if (token) {
-                            await signInWithCustomToken(auth, token);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                        
-                        onAuthStateChanged(auth, (u) => setUser(u));
+                        if (token) { await signInWithCustomToken(auth, token); } else { await signInAnonymously(auth); }
+                        onAuthStateChanged(auth, (u) => { setUser(u); setFirebaseEnabled(true); });
                     } catch (err) {
-                        console.error("Firebase Auth Error:", err);
+                        console.warn("Firebase non disponible, mode localStorage actif.", err);
                     }
                 };
-                initFirebase();
+                setTimeout(initFirebase, 500); // attendre le chargement des modules
             }, []);
 
+            // ── Chargement des inscriptions (Firebase OU localStorage) ──
             useEffect(() => {
-                if (!user || !isAdminAuthenticated) return;
-                const { getFirestore, collection, query, onSnapshot } = window.FirebaseSDK;
-                const db = getFirestore();
-                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'registrations'));
-                
-                const unsubscribe = onSnapshot(q, (snapshot) => {
-                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setRegistrations(data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
-                }, (err) => console.error("Firestore Listen Error:", err));
-                
-                return () => unsubscribe();
-            }, [user, isAdminAuthenticated]);
+                if (!isAdminAuthenticated) return;
 
+                if (firebaseEnabled && user) {
+                    // Mode Firebase
+                    const { getFirestore, collection, query, onSnapshot } = window.FirebaseSDK;
+                    const db = getFirestore();
+                    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'registrations'));
+                    const unsub = onSnapshot(q, (snapshot) => {
+                        const firebaseData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                            .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                        // Fusionner avec localStorage pour ne rien perdre
+                        const localData = lsGetAll();
+                        const allIds = new Set(firebaseData.map(d => d.id));
+                        const onlyLocal = localData.filter(d => !allIds.has(d.id));
+                        setRegistrations([...firebaseData, ...onlyLocal]);
+                    }, (err) => {
+                        console.warn("Firestore error, fallback localStorage:", err);
+                        setRegistrations(lsGetAll());
+                    });
+                    return () => unsub();
+                } else {
+                    // Mode localStorage uniquement
+                    setRegistrations(lsGetAll());
+                }
+            }, [user, isAdminAuthenticated, firebaseEnabled]);
+
+            // ── Soumission du formulaire ──
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                if (!user) return;
-                const { getFirestore, collection, addDoc, serverTimestamp } = window.FirebaseSDK;
-                const db = getFirestore();
                 setStatus('loading');
-                try {
-                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'registrations'), {
-                        ...formData,
-                        userId: user.uid,
-                        createdAt: serverTimestamp(),
-                        status: 'pending'
-                    });
-                    setStatus('success');
-                    setFormData({ fullName: '', email: '', phone: '', program: '' });
-                    setTimeout(() => setStatus('idle'), 5000);
-                } catch (e) { 
-                    console.error("Submit Error:", e);
-                    setStatus('error'); 
+                const entry = { ...formData, status: 'pending' };
+
+                // Toujours sauvegarder en localStorage d'abord (filet de sécurité)
+                lsSave(entry);
+
+                // Tentative Firebase en parallèle
+                if (firebaseEnabled && user) {
+                    try {
+                        const { getFirestore, collection, addDoc, serverTimestamp } = window.FirebaseSDK;
+                        const db = getFirestore();
+                        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'registrations'), {
+                            ...entry, userId: user.uid, createdAt: serverTimestamp()
+                        });
+                    } catch (err) {
+                        console.warn("Firebase write failed, saved to localStorage only:", err);
+                    }
+                }
+
+                setStatus('success');
+                setFormData({ fullName: '', email: '', phone: '', program: '' });
+                setTimeout(() => setStatus('idle'), 5000);
+            };
+
+            const handleAdminLogin = (e) => {
+                e.preventDefault();
+                if (adminPasskey === SECRET_PASSKEY) {
+                    setIsAdminAuthenticated(true);
+                    setAuthError(false);
+                } else {
+                    setAuthError(true);
                 }
             };
 
@@ -172,41 +234,90 @@
                 { id: "lang", title: "Langues pour Leaders", iconName: "Languages", desc: "Brisez les barrières linguistiques internationales." }
             ];
 
+            const formatDate = (val) => {
+                if (!val) return 'N/A';
+                if (val.seconds) return new Date(val.seconds * 1000).toLocaleString('fr-FR');
+                return new Date(val).toLocaleString('fr-FR');
+            };
+
             const Dashboard = () => (
                 <div className="min-h-screen bg-slate-50 pt-28 pb-12">
                     {!isAdminAuthenticated ? (
                         <div className="max-w-md mx-auto p-10 bg-white rounded-[2.5rem] shadow-2xl text-center space-y-8">
                             <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto text-deep">
-                                <LucideIcon name="Lock" size={40} />
+                                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#1A3C5E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                             </div>
                             <h2 className="text-2xl font-black uppercase text-deep">Accès Restreint</h2>
-                            <form onSubmit={(e) => { e.preventDefault(); if(adminPasskey === SECRET_PASSKEY) { setIsAdminAuthenticated(true); setAuthError(false); } else setAuthError(true); }} className="space-y-4">
-                                <input type="password" placeholder="••••" className={`w-full px-6 py-4 rounded-2xl border-2 text-center text-xl font-bold ${authError ? 'border-red-500' : 'border-slate-100'}`} value={adminPasskey} onChange={e => setAdminPasskey(e.target.value)} />
-                                <button className="w-full py-4 bg-deep text-white rounded-2xl font-black uppercase text-xs tracking-widest">Déverrouiller</button>
+                            <form onSubmit={handleAdminLogin} className="space-y-4">
+                                <input
+                                    type="password"
+                                    placeholder="Mot de passe admin"
+                                    className={`w-full px-6 py-4 rounded-2xl border-2 text-center text-xl font-bold ${authError ? 'border-red-500 bg-red-50' : 'border-slate-100'}`}
+                                    value={adminPasskey}
+                                    onChange={e => { setAdminPasskey(e.target.value); setAuthError(false); }}
+                                />
+                                {authError && <p className="text-red-500 text-xs font-bold uppercase">Mot de passe incorrect</p>}
+                                <button type="submit" className="w-full py-4 bg-deep text-white rounded-2xl font-black uppercase text-xs tracking-widest hover:opacity-90 transition-opacity">
+                                    Déverrouiller
+                                </button>
                             </form>
                         </div>
                     ) : (
                         <div className="max-w-7xl mx-auto px-6">
-                            <div className="flex justify-between items-center mb-10">
-                                <h1 className="text-3xl font-black uppercase text-deep">Inscriptions ({registrations.length})</h1>
-                                <button onClick={() => setIsAdminAuthenticated(false)} className="text-red-500 font-bold text-[10px] uppercase">Sortir</button>
+                            <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
+                                <div>
+                                    <h1 className="text-3xl font-black uppercase text-deep">Inscriptions ({registrations.length})</h1>
+                                    <p className="text-xs text-slate-400 mt-1 font-semibold">
+                                        {firebaseEnabled ? '🟢 Synchronisé avec Firebase + localStorage' : '🟡 Sauvegarde locale uniquement (localStorage)'}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <button
+                                        onClick={() => exportCSV(registrations)}
+                                        className="flex items-center gap-2 px-5 py-3 bg-green-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-green-700 transition-colors"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                        Exporter CSV
+                                    </button>
+                                    <button onClick={() => { setIsAdminAuthenticated(false); setAdminPasskey(''); }} className="text-red-500 font-bold text-[10px] uppercase hover:text-red-700 transition-colors">
+                                        Sortir
+                                    </button>
+                                </div>
                             </div>
-                            <div className="bg-white rounded-[2.5rem] shadow-xl overflow-hidden overflow-x-auto">
-                                <table className="w-full text-left min-w-[600px]">
-                                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400">
-                                        <tr><th className="px-8 py-6">Nom</th><th className="px-8 py-6">Programme</th><th className="px-8 py-6">Contact</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-50">
-                                        {registrations.map(r => (
-                                            <tr key={r.id} className="hover:bg-slate-50/50">
-                                                <td className="px-8 py-6 font-black text-sm">{r.fullName}</td>
-                                                <td className="px-8 py-6"><span className="text-[10px] font-black uppercase bg-blue-50 text-blue-600 px-3 py-1 rounded-full">{r.program}</span></td>
-                                                <td className="px-8 py-6 text-xs text-slate-500">{r.email} <br/> {r.phone}</td>
+
+                            {registrations.length === 0 ? (
+                                <div className="bg-white rounded-[2.5rem] shadow-xl p-20 text-center text-slate-400">
+                                    <p className="font-black uppercase text-sm">Aucune inscription pour le moment</p>
+                                </div>
+                            ) : (
+                                <div className="bg-white rounded-[2.5rem] shadow-xl overflow-hidden overflow-x-auto">
+                                    <table className="w-full text-left min-w-[700px]">
+                                        <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400">
+                                            <tr>
+                                                <th className="px-8 py-6">Nom</th>
+                                                <th className="px-8 py-6">Programme</th>
+                                                <th className="px-8 py-6">Contact</th>
+                                                <th className="px-8 py-6">Date</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                            {registrations.map(r => (
+                                                <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
+                                                    <td className="px-8 py-6 font-black text-sm text-deep">{r.fullName}</td>
+                                                    <td className="px-8 py-6">
+                                                        <span className="text-[10px] font-black uppercase bg-blue-50 text-blue-600 px-3 py-1 rounded-full whitespace-nowrap">{r.program}</span>
+                                                    </td>
+                                                    <td className="px-8 py-6 text-xs text-slate-500">
+                                                        <div>{r.email}</div>
+                                                        <div className="font-bold text-slate-700">{r.phone}</div>
+                                                    </td>
+                                                    <td className="px-8 py-6 text-xs text-slate-400 whitespace-nowrap">{formatDate(r.createdAt)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -214,10 +325,10 @@
 
             return (
                 <div className="min-h-screen">
-                    {/* Navigation flottante Statique/Admin */}
+                    {/* Navigation flottante */}
                     <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] bg-deep/90 backdrop-blur-xl p-2 rounded-full shadow-2xl flex space-x-2">
-                        <button onClick={() => setActiveTab('site')} className={`px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest ${activeTab === 'site' ? 'bg-white text-deep' : 'text-white'}`}>Site Vitrine</button>
-                        <button onClick={() => setActiveTab('admin')} className={`px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest ${activeTab === 'admin' ? 'bg-white text-deep' : 'text-white'}`}>Admin</button>
+                        <button onClick={() => setActiveTab('site')} className={`px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-colors ${activeTab === 'site' ? 'bg-white text-deep' : 'text-white hover:bg-white/10'}`}>Site Vitrine</button>
+                        <button onClick={() => setActiveTab('admin')} className={`px-6 py-3 rounded-full text-[9px] font-black uppercase tracking-widest transition-colors ${activeTab === 'admin' ? 'bg-white text-deep' : 'text-white hover:bg-white/10'}`}>Admin</button>
                     </div>
 
                     {activeTab === 'admin' ? <Dashboard /> : (
@@ -245,13 +356,14 @@
                                 <div className="max-w-7xl mx-auto px-6">
                                     <div className="max-w-3xl space-y-12">
                                         <div className="inline-flex items-center space-x-2 px-4 py-2 bg-white rounded-full text-[10px] font-black uppercase text-action">
-                                            <LucideIcon name="Zap" size={14} />
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                                             <span>Leaders de demain</span>
                                         </div>
                                         <h1 className="text-6xl lg:text-[100px] font-black leading-[0.85] text-deep uppercase tracking-tighter">LA HAUTEUR <br/><span className="text-action italic">COMME NORME.</span></h1>
-                                        <p className="text-xl lg:text-2xl font-medium border-l-4 border-red-600 pl-8 text-slate-700">Nous forgions les Alpinistes de l'économie malgache, capables de conquérir tous les sommets.</p>
-                                        <button onClick={() => scrollToSection('programmes')} className="bg-deep text-white px-10 py-6 rounded-3xl font-black text-xs uppercase tracking-widest shadow-2xl flex items-center group">
-                                            Découvrir les cursus <LucideIcon name="ChevronRight" size={16} className="ml-2 group-hover:translate-x-1 transition-transform" />
+                                        <p className="text-xl lg:text-2xl font-medium border-l-4 border-red-600 pl-8 text-slate-700">Nous forgeons les Alpinistes de l'économie malgache, capables de conquérir tous les sommets.</p>
+                                        <button onClick={() => scrollToSection('programmes')} className="bg-deep text-white px-10 py-6 rounded-3xl font-black text-xs uppercase tracking-widest shadow-2xl flex items-center group hover:opacity-90 transition-opacity">
+                                            Découvrir les cursus
+                                            <svg className="ml-2 group-hover:translate-x-1 transition-transform" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
                                         </button>
                                     </div>
                                 </div>
@@ -265,19 +377,19 @@
                                         <p className="text-lg text-slate-600">La théorie sans exécution est un poids mort. Notre approche repose sur la mise en situation réelle et le mentorat direct par des experts du terrain.</p>
                                         <div className="grid gap-6">
                                             {[
-                                                {icon: "Target", t: "Focus Résultats"}, 
-                                                {icon: "TrendingUp", t: "Élite Locale"}, 
-                                                {icon: "ShieldCheck", t: "Certification Internationale"}
+                                                { icon: "🎯", t: "Focus Résultats" },
+                                                { icon: "📈", t: "Élite Locale" },
+                                                { icon: "🏆", t: "Certification Internationale" }
                                             ].map((item, i) => (
                                                 <div key={i} className="flex items-center space-x-6 p-6 rounded-3xl bg-slate-50 border border-slate-100">
-                                                    <div className="text-blue-500"><LucideIcon name={item.icon} size={28} /></div>
+                                                    <span className="text-2xl">{item.icon}</span>
                                                     <h4 className="font-black uppercase text-xs tracking-widest text-deep">{item.t}</h4>
                                                 </div>
                                             ))}
                                         </div>
                                     </div>
                                     <div className="aspect-[4/5] bg-slate-100 rounded-[3rem] shadow-2xl overflow-hidden relative group">
-                                        <div className="absolute inset-0 bg-deep/10 group-hover:bg-transparent transition-colors"></div>
+                                        <div className="absolute inset-0 bg-deep/10 group-hover:bg-transparent transition-colors z-10"></div>
                                         <img src="https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1000" alt="Training" className="w-full h-full object-cover" />
                                     </div>
                                 </div>
@@ -292,12 +404,17 @@
                                     <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
                                         {programs.map((p, i) => (
                                             <div key={i} className="bg-white p-10 rounded-[2.5rem] shadow-sm hover:shadow-2xl transition-all border border-slate-100 flex flex-col group">
-                                                <div className="mb-8 p-4 bg-blue-50 rounded-2xl w-fit text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-colors">
-                                                    <LucideIcon name={p.iconName} size={32} />
+                                                <div className="mb-8 p-4 bg-blue-50 rounded-2xl w-fit text-blue-500 group-hover:bg-blue-500 group-hover:text-white transition-colors text-3xl">
+                                                    {['🤖', '💬', '📋', '🌍'][i]}
                                                 </div>
                                                 <h3 className="text-xl font-black uppercase text-deep mb-4">{p.title}</h3>
                                                 <p className="text-sm text-slate-500 mb-8 flex-grow">{p.desc}</p>
-                                                <button onClick={() => { setFormData({...formData, program: p.title}); scrollToSection('inscription'); }} className="w-full py-4 bg-slate-50 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-deep hover:text-white transition-all">S'inscrire</button>
+                                                <button
+                                                    onClick={() => { setFormData(prev => ({...prev, program: p.title})); scrollToSection('inscription'); }}
+                                                    className="w-full py-4 bg-slate-50 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-deep hover:text-white transition-all"
+                                                >
+                                                    S'inscrire
+                                                </button>
                                             </div>
                                         ))}
                                     </div>
@@ -312,31 +429,62 @@
                                             <h2 className="text-5xl lg:text-6xl font-black uppercase leading-none">Prêt pour <br/><span className="text-blue-300 italic">l'Ascension ?</span></h2>
                                             <p className="text-xl opacity-70">Remplissez le formulaire et un consultant pédagogique analysera votre profil sous 24h.</p>
                                             <div className="flex items-center space-x-4 pt-6">
-                                                <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center"><LucideIcon name="Phone" size={20} /></div>
-                                                <span className="font-bold">+261 34 00 000 00</span>
+                                                <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.68 13.9a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.77 3h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 10.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 17.92z"/></svg>
+                                                </div>
+                                                {/* ✅ NUMÉRO MIS À JOUR */}
+                                                <span className="font-bold text-lg tracking-wide">038 38 737 35</span>
                                             </div>
                                         </div>
                                         <div className="lg:w-1/2 bg-soft p-8 lg:p-20">
                                             {status === 'success' ? (
                                                 <div className="h-full flex flex-col items-center justify-center space-y-6 py-10">
-                                                    <LucideIcon name="CheckCircle2" size={80} className="text-green-500" />
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                                                     <div className="text-center">
-                                                        <h3 className="text-2xl font-black uppercase text-deep">Candidature Reçue</h3>
-                                                        <p className="text-slate-500 mt-2 font-bold uppercase text-xs">Nous reviendrons vers vous très vite.</p>
+                                                        <h3 className="text-2xl font-black uppercase text-deep">Candidature Reçue !</h3>
+                                                        <p className="text-slate-500 mt-2 font-bold uppercase text-xs">Votre inscription a été sauvegardée. Nous reviendrons vers vous très vite.</p>
                                                     </div>
                                                 </div>
                                             ) : (
                                                 <form onSubmit={handleSubmit} className="space-y-6">
                                                     <div className="space-y-4">
-                                                        <input required value={formData.fullName} onChange={e => setFormData({...formData, fullName: e.target.value})} placeholder="Nom Complet" className="w-full px-8 py-5 rounded-2xl font-bold border-2 border-transparent focus:border-blue-400 outline-none transition-all" />
-                                                        <input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="Email Professionnel" className="w-full px-8 py-5 rounded-2xl font-bold border-2 border-transparent focus:border-blue-400 outline-none transition-all" />
-                                                        <input required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="Téléphone (WhatsApp)" className="w-full px-8 py-5 rounded-2xl font-bold border-2 border-transparent focus:border-blue-400 outline-none transition-all" />
-                                                        <select required value={formData.program} onChange={e => setFormData({...formData, program: e.target.value})} className="w-full px-8 py-5 rounded-2xl font-bold bg-white border-2 border-transparent focus:border-blue-400 outline-none transition-all appearance-none cursor-pointer">
+                                                        <input
+                                                            required
+                                                            value={formData.fullName}
+                                                            onChange={e => setFormData(prev => ({...prev, fullName: e.target.value}))}
+                                                            placeholder="Nom Complet"
+                                                            className="w-full px-8 py-5 rounded-2xl font-bold border-2 border-transparent focus:border-blue-400 outline-none transition-all"
+                                                        />
+                                                        <input
+                                                            required
+                                                            type="email"
+                                                            value={formData.email}
+                                                            onChange={e => setFormData(prev => ({...prev, email: e.target.value}))}
+                                                            placeholder="Email Professionnel"
+                                                            className="w-full px-8 py-5 rounded-2xl font-bold border-2 border-transparent focus:border-blue-400 outline-none transition-all"
+                                                        />
+                                                        <input
+                                                            required
+                                                            value={formData.phone}
+                                                            onChange={e => setFormData(prev => ({...prev, phone: e.target.value}))}
+                                                            placeholder="Téléphone (WhatsApp)"
+                                                            className="w-full px-8 py-5 rounded-2xl font-bold border-2 border-transparent focus:border-blue-400 outline-none transition-all"
+                                                        />
+                                                        <select
+                                                            required
+                                                            value={formData.program}
+                                                            onChange={e => setFormData(prev => ({...prev, program: e.target.value}))}
+                                                            className="w-full px-8 py-5 rounded-2xl font-bold bg-white border-2 border-transparent focus:border-blue-400 outline-none transition-all appearance-none cursor-pointer"
+                                                        >
                                                             <option value="">Sélectionnez un cursus</option>
                                                             {programs.map(p => <option key={p.id} value={p.title}>{p.title}</option>)}
                                                         </select>
                                                     </div>
-                                                    <button disabled={status === 'loading'} className="w-full py-6 bg-deep text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
+                                                    <button
+                                                        type="submit"
+                                                        disabled={status === 'loading'}
+                                                        className="w-full py-6 bg-deep text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+                                                    >
                                                         {status === 'loading' ? 'Envoi en cours...' : 'Valider ma candidature'}
                                                     </button>
                                                 </form>
@@ -347,7 +495,7 @@
                             </section>
 
                             {/* Footer */}
-                            <footer className="py-20 bg-deep text-center">
+                            <footer className="py-20 bg-deep text-center pb-32">
                                 <LogoAlpinistes className="w-12 h-12 mx-auto mb-6 opacity-20" />
                                 <div className="space-y-4">
                                     <p className="text-white/40 text-[9px] font-black uppercase tracking-[0.3em]">Alpinistes Executive Education • Madagascar</p>
